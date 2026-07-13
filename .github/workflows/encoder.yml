@@ -1,0 +1,51 @@
+name: Encoder
+
+# Worker d'encodage vidéo Worimo, hébergé gratuitement sur GitHub Actions.
+# Déclenché à la demande par la fonction finalize-video (repository_dispatch)
+# dès qu'une vidéo est prête à encoder → zéro minute gaspillée à vide.
+# Un filet de sécurité toutes les 6 h rattrape un éventuel déclenchement manqué.
+
+on:
+  repository_dispatch:
+    types: [encode]
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 */6 * * *"
+
+# Un seul run à la fois (claim_next_video_job est déjà atomique, mais on évite
+# de lancer plusieurs runners en parallèle pour rien).
+concurrency:
+  group: encoder
+  cancel-in-progress: false
+
+jobs:
+  encode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: S'assurer que ffmpeg est présent
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
+      - name: Installer les dépendances du worker
+        working-directory: services/encoder
+        run: npm ci
+
+      - name: Vider la file d'encodage
+        working-directory: services/encoder
+        env:
+          RUN_ONCE: "1"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          STAGING_BUCKET: ${{ secrets.STAGING_BUCKET }}
+          PUBLIC_BUCKET: ${{ secrets.PUBLIC_BUCKET }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+        run: npm start

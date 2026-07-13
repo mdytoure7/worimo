@@ -14,6 +14,29 @@ import { headObject, r2Config } from "../_shared/r2.ts";
 
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 
+/**
+ * Réveille le worker d'encodage hébergé sur GitHub Actions (repository_dispatch)
+ * dès qu'une vidéo entre en file — pas d'attente de la minuterie de secours.
+ * Non bloquant : si les secrets ne sont pas configurés ou si l'appel échoue,
+ * le cron du workflow (toutes les 6 h) rattrapera le job.
+ */
+async function triggerEncoder(): Promise<void> {
+  const token = Deno.env.get("GITHUB_DISPATCH_TOKEN");
+  const repo = Deno.env.get("GITHUB_REPO"); // ex. "moncompte/worimo"
+  if (!token || !repo) return;
+  const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "worimo-finalize-video",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ event_type: "encode" }),
+  });
+  if (!res.ok) throw new Error(`GitHub dispatch ${res.status}: ${await res.text()}`);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return errorResponse("Méthode non autorisée", 405);
@@ -67,6 +90,11 @@ Deno.serve(async (req) => {
     await serviceClient.from("property_media")
       .update({ status: "processing" })
       .eq("id", job.media_id);
+
+    // Réveille le worker GitHub Actions (échec non bloquant).
+    await triggerEncoder().catch((e) =>
+      console.warn("dispatch encoder:", e instanceof Error ? e.message : e),
+    );
 
     return jsonResponse({ ok: true, job_id: job.id, status: "queued" });
   } catch (err) {

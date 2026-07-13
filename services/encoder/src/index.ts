@@ -117,15 +117,22 @@ async function main(): Promise<void> {
   console.log(`  Supabase : ${config.supabaseUrl}`);
   console.log(`  S3       : ${config.s3Endpoint} (staging=${config.stagingBucket}, public=${config.publicBucket})`);
 
+  if (config.runOnce) console.log("  Mode : run-once (vider la file puis s'arrêter)");
+
+  let processed = 0;
   while (!shuttingDown) {
     const job = await claimJob();
     if (job) {
       await processJob(job);
+      processed++;
+    } else if (config.runOnce) {
+      console.log(`File vide — arrêt (${processed} job(s) traité(s)).`);
+      break;
     } else {
       await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs));
     }
   }
-  console.log("Arrêt propre du worker.");
+  if (!config.runOnce) console.log("Arrêt propre du worker.");
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

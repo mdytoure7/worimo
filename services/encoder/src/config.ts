@@ -21,6 +21,11 @@ export const config = {
   maxAttempts: Number(process.env.MAX_ATTEMPTS ?? 3),
   tmpDir: process.env.TMP_DIR ?? "tmp",
 
+  // Mode « traiter la file puis s'arrêter » : utilisé par GitHub Actions
+  // (un run par déclenchement, on ne consomme pas de minutes à vide).
+  // Sur un hébergement 24/7 (VPS/Cloud Run), laisser à false pour la boucle.
+  runOnce: process.env.RUN_ONCE === "1",
+
   // Contraintes produit : vidéo verticale de 15 à 60 s.
   // Tolérance de 0,5 s pour les arrondis d'encodeurs mobiles.
   minDurationSeconds: 14.5,
