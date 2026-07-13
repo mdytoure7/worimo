@@ -1,0 +1,11 @@
+{
+  "name": "worimo",
+  "private": true,
+  "description": "Monorepo Worimo — la CLI Supabase est installée ici en dépendance de dev (npx supabase ...)",
+  "scripts": {
+    "sb": "supabase"
+  },
+  "devDependencies": {
+    "supabase": "^2.0.0"
+  }
+}

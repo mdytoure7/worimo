@@ -1,0 +1,56 @@
+project_id = "worimo"
+
+# Ports en 56xxx : la plage par défaut 54xxx tombe dans les plages TCP
+# réservées par Windows (Hyper-V/WinNAT) sur certains postes.
+[api]
+enabled = true
+port = 56321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 100
+
+[db]
+port = 56322
+shadow_port = 56320
+major_version = 15
+
+[studio]
+enabled = true
+port = 56323
+
+[inbucket]
+enabled = true
+port = 56324
+
+# Analytics (Logflare) : désactivé — exige un daemon Docker exposé en TCP
+# sous Windows, et n'apporte rien au développement local de Worimo.
+[analytics]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://localhost:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+# OTP SMS : en local on utilise des numéros de test (pas de vrai SMS envoyé).
+# En production, configurer un fournisseur (Twilio / MessageBird / Vonage)
+# dans le dashboard Supabase — voir README section "Auth téléphone".
+[auth.sms]
+enable_signup = true
+enable_confirmations = true
+
+[auth.sms.test_otp]
+221701234567 = "123456"
+221771234567 = "123456"
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"

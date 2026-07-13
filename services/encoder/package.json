@@ -1,0 +1,23 @@
+{
+  "name": "worimo-encoder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Worker d'encodage vidéo Worimo : staging R2 -> ffmpeg HLS (480p/720p/1080p) -> R2 public",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}
