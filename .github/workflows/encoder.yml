@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22" # 22+ fournit un WebSocket natif requis par supabase-js
 
       - name: S'assurer que ffmpeg est présent
         run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
