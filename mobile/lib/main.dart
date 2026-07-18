@@ -13,6 +13,7 @@ import 'features/profile/profile_screen.dart';
 import 'features/property/property_detail_screen.dart';
 import 'features/publish/publish_screen.dart';
 import 'features/search/search_screen.dart';
+import 'features/shell/main_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,7 +48,7 @@ class WorimoApp extends StatelessWidget {
         onGenerateRoute: (settings) {
           switch (settings.name) {
             case '/':
-              return _route(const FeedScreen());
+              return _route(const MainShell());
             case '/login':
               return _route(const LoginScreen());
             case '/search':

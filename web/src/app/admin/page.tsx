@@ -127,6 +127,9 @@ export default function AdminPage() {
           <span className="text-primary">Wori</span>mo
         </Link>
         <span className="text-white/60">· Administration</span>
+        <Link href="/admin/dashboard" className="ml-auto text-sm text-primary hover:underline">
+          Dashboard KPI →
+        </Link>
       </header>
 
       <div className="mx-auto max-w-3xl p-4">

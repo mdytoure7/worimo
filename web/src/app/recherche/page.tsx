@@ -12,6 +12,7 @@ import { supabase, supabaseConfigured } from "@/lib/supabase";
 import { PROPERTY_SELECT, PROPERTY_TYPE_LABELS, type Property } from "@/lib/types";
 import { CITIES } from "@/lib/constants";
 import PropertyCard from "@/components/PropertyCard";
+import BottomNav from "@/components/BottomNav";
 
 export const revalidate = 0;
 
@@ -95,6 +96,25 @@ async function search(filters: Filters): Promise<{ properties: Property[]; count
     console.error("Erreur de recherche :", error.message);
     return { properties: [], count: 0 };
   }
+
+  // Tracking (fire-and-forget) : seulement si au moins un filtre est actif,
+  // pour ne pas compter la simple ouverture de la page vide.
+  const hasActiveFilter =
+    filters.ville || filters.type || filters.offre || filters.prix_min ||
+    filters.prix_max || filters.surface_min || filters.surface_max || filters.verifie;
+  if (hasActiveFilter) {
+    const summary = [
+      filters.ville, filters.type, filters.offre,
+      filters.prix_min && `>=${filters.prix_min}`,
+      filters.prix_max && `<=${filters.prix_max}`,
+      filters.verifie && "vérifié",
+    ].filter(Boolean).join(" ");
+    supabase.from("events").insert({ type: "search", query: summary || null }).then(
+      () => {},
+      () => {},
+    );
+  }
+
   return { properties: (data ?? []) as unknown as Property[], count: count ?? 0 };
 }
 
@@ -109,6 +129,55 @@ function pageHref(filters: Filters, page: number): string {
   return suffix ? `/recherche?${suffix}` : "/recherche";
 }
 
+const TYPE_EMOJI: Record<string, string> = {
+  apartment: "🏢",
+  house: "🏡",
+  land: "🌱",
+  commercial: "🏬",
+  office: "🏙️",
+};
+
+/** Bande « Découvrir » : chips catégories + villes, scroll horizontal, façon TikTok. */
+function DiscoverChips({ activeType, activeVille }: { activeType: string; activeVille: string }) {
+  return (
+    <div className="mx-auto max-w-5xl px-4 pt-3">
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {Object.entries(PROPERTY_TYPE_LABELS).map(([value, label]) => {
+          const active = activeType === value;
+          return (
+            <Link
+              key={value}
+              href={`/recherche?type=${value}`}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition ${
+                active ? "bg-primary text-white" : "bg-white/8 text-white/80 hover:bg-white/15"
+              }`}
+            >
+              <span aria-hidden>{TYPE_EMOJI[value]}</span>
+              {label}
+            </Link>
+          );
+        })}
+      </div>
+      <div className="-mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {CITIES.map((city) => {
+          const active = activeVille.toLowerCase() === city.toLowerCase();
+          return (
+            <Link
+              key={city}
+              href={`/recherche?ville=${encodeURIComponent(city)}`}
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm transition ${
+                active ? "bg-white text-night" : "bg-white/8 text-white/70 hover:bg-white/15"
+              }`}
+            >
+              {city}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default async function SearchPage({
   searchParams,
 }: {
@@ -121,19 +190,16 @@ export default async function SearchPage({
   const totalPages = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
   return (
-    <main className="min-h-dvh bg-night pb-16">
+    <main className="min-h-dvh bg-night pb-24">
       <header className="sticky top-0 z-10 flex items-center justify-between bg-night/90 p-4 backdrop-blur">
         <Link href="/" className="text-lg font-bold">
           <span className="text-primary">Wori</span>mo
           <span className="ml-2 text-sm font-normal text-white/60">· Rechercher</span>
         </Link>
-        <Link
-          href="/publier"
-          className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold transition hover:bg-primary-dark"
-        >
-          + Publier
-        </Link>
       </header>
+
+      {/* Découvrir — accès rapide par catégorie et par ville (façon Discover TikTok) */}
+      <DiscoverChips activeType={filters.type} activeVille={filters.ville} />
 
       <div className="mx-auto max-w-5xl p-4">
         {/* Formulaire GET : les filtres vivent dans l'URL */}
@@ -297,6 +363,7 @@ export default async function SearchPage({
           </nav>
         )}
       </div>
+      <BottomNav />
     </main>
   );
 }

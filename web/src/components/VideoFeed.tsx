@@ -1,16 +1,22 @@
 "use client";
 
 // Feed vidéo vertical façon TikTok/Reels :
+//  - onglets en haut (Pour toi / À proximité / Louer / Acheter) — segmentation du feed ;
 //  - scroll-snap plein écran, une annonce par écran ;
 //  - autoplay/pause piloté par IntersectionObserver ;
+//  - rail d'actions latéral : agent, favoris, partager, WhatsApp, appeler ;
 //  - lecture HLS adaptative (hls.js, ou HLS natif sur Safari/iOS) ;
 //  - hls.js n'est attaché qu'aux vidéos proches de l'écran (économie de data).
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type Hls from "hls.js";
+import { getBrowserSupabase } from "@/lib/supabase-browser";
 import {
+  PROPERTY_SELECT,
+  FEED_PAGE_SIZE,
   formatPrice,
+  getAgency,
   getVerification,
   getVideo,
   whatsappLink,
@@ -20,21 +26,179 @@ import {
 } from "@/lib/types";
 import VerifiedBadge from "./VerifiedBadge";
 import FavoriteButton from "./FavoriteButton";
+import { trackEvent } from "@/lib/track";
 
-export default function VideoFeed({ properties }: { properties: Property[] }) {
+// -----------------------------------------------------------------------------
+// Onglets de feed — segmentation façon « Pour toi / Abonnements » de TikTok.
+// -----------------------------------------------------------------------------
+type FeedTab = "foryou" | "nearby" | "rent" | "sale";
+
+const TABS: { key: FeedTab; label: string }[] = [
+  { key: "foryou", label: "Pour toi" },
+  { key: "nearby", label: "À proximité" },
+  { key: "rent", label: "À louer" },
+  { key: "sale", label: "À vendre" },
+];
+
+interface Coords {
+  lat: number;
+  lng: number;
+}
+
+// Distance haversine (km) — pour trier « À proximité » côté client.
+function distanceKm(a: Coords, b: Coords): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+export default function VideoFeed({ properties: initialProperties }: { properties: Property[] }) {
+  const [tab, setTab] = useState<FeedTab>("foryou");
+  const [items, setItems] = useState(initialProperties);
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted] = useState(true);
+  const [status, setStatus] = useState<"idle" | "loading" | "empty" | "geo-denied">("idle");
   const containerRef = useRef<HTMLDivElement>(null);
+  // Refs (pas de state) : lues en synchrone dans l'observer, pas besoin de re-render.
+  const loadingMoreRef = useRef(false);
+  const exhaustedRef = useRef(initialProperties.length < FEED_PAGE_SIZE);
+
+  // Requête d'une page selon l'onglet actif. `cursor` = dernière annonce chargée
+  // (pagination stable). Pour « À proximité » on charge un lot unique trié par distance.
+  const fetchPage = useCallback(
+    async (activeTab: FeedTab, last: Property | null, coords: Coords | null): Promise<Property[]> => {
+      const supabase = getBrowserSupabase();
+
+      if (activeTab === "nearby") {
+        if (!coords) return [];
+        // Lot large des annonces géolocalisées récentes, tri par distance en JS.
+        const { data, error } = await supabase
+          .from("properties")
+          .select(PROPERTY_SELECT)
+          .eq("status", "published")
+          .not("latitude", "is", null)
+          .not("longitude", "is", null)
+          .order("published_at", { ascending: false })
+          .limit(80);
+        if (error) throw error;
+        const list = (data ?? []) as unknown as Property[];
+        return list
+          .filter((p) => p.latitude != null && p.longitude != null)
+          .sort(
+            (a, b) =>
+              distanceKm(coords, { lat: a.latitude!, lng: a.longitude! }) -
+              distanceKm(coords, { lat: b.latitude!, lng: b.longitude! }),
+          );
+      }
+
+      let query = supabase
+        .from("properties")
+        .select(PROPERTY_SELECT)
+        .eq("status", "published");
+      if (activeTab === "sale") query = query.eq("offer_type", "sale");
+      if (activeTab === "rent") query = query.eq("offer_type", "rent");
+      if (last?.published_at) {
+        query = query.or(
+          `published_at.lt.${last.published_at},and(published_at.eq.${last.published_at},id.lt.${last.id})`,
+        );
+      }
+      const { data, error } = await query
+        .order("published_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(FEED_PAGE_SIZE);
+      if (error) throw error;
+      return (data ?? []) as unknown as Property[];
+    },
+    [],
+  );
+
+  // Demande la géolocalisation (une fois) pour l'onglet « À proximité ».
+  const getCoords = useCallback(
+    () =>
+      new Promise<Coords | null>((resolve) => {
+        if (!("geolocation" in navigator)) return resolve(null);
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve(null),
+          { timeout: 8000, maximumAge: 300000 },
+        );
+      }),
+    [],
+  );
+
+  // Changement d'onglet : recharge le feed depuis le début.
+  async function switchTab(next: FeedTab) {
+    if (next === tab) return;
+    setTab(next);
+    setActiveIndex(0);
+    setStatus("loading");
+    exhaustedRef.current = true; // rechargé ci-dessous
+    try {
+      let coords: Coords | null = null;
+      if (next === "nearby") {
+        coords = await getCoords();
+        if (!coords) {
+          setItems([]);
+          setStatus("geo-denied");
+          return;
+        }
+      }
+      const first = await fetchPage(next, null, coords);
+      containerRef.current?.scrollTo({ top: 0 });
+      setItems(first);
+      exhaustedRef.current = next === "nearby" || first.length < FEED_PAGE_SIZE;
+      setStatus(first.length === 0 ? "empty" : "idle");
+    } catch (e) {
+      console.error("Erreur de chargement du feed :", e);
+      setStatus("empty");
+    }
+  }
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const slides = Array.from(container.children);
+    const slides = Array.from(container.children).filter((el) =>
+      el.hasAttribute("data-slide"),
+    );
+
+    // Pagination infinie par curseur (published_at, id) — stable même si de
+    // nouvelles annonces sont publiées pendant que l'utilisateur scrolle.
+    async function loadMore() {
+      if (loadingMoreRef.current || exhaustedRef.current) return;
+      const last = items[items.length - 1];
+      if (!last) return;
+      loadingMoreRef.current = true;
+      try {
+        const next = await fetchPage(tab, last, null);
+        if (next.length < FEED_PAGE_SIZE) exhaustedRef.current = true;
+        if (next.length > 0) {
+          setItems((prev) => {
+            const seen = new Set(prev.map((p) => p.id));
+            return [...prev, ...next.filter((p) => !seen.has(p.id))];
+          });
+        }
+      } catch (e) {
+        console.error("Erreur de chargement du feed (suite) :", e);
+      } finally {
+        loadingMoreRef.current = false;
+      }
+    }
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {
-            setActiveIndex(slides.indexOf(entry.target));
+            const index = slides.indexOf(entry.target);
+            setActiveIndex(index);
+            const property = items[index];
+            if (property) trackEvent("property_view", { propertyId: property.id });
+            // À 3 slides de la fin : précharge la suite en silence.
+            if (items.length - index <= 3) loadMore();
           }
         }
       },
@@ -42,24 +206,65 @@ export default function VideoFeed({ properties }: { properties: Property[] }) {
     );
     slides.forEach((slide) => observer.observe(slide));
     return () => observer.disconnect();
-  }, [properties.length]);
+  }, [items, tab, fetchPage]);
 
   return (
-    <div
-      ref={containerRef}
-      className="feed-scroll h-dvh snap-y snap-mandatory overflow-y-scroll bg-night"
-    >
-      {properties.map((property, index) => (
-        <FeedSlide
-          key={property.id}
-          property={property}
-          active={index === activeIndex}
-          // On ne charge le flux que pour la slide visible et ses voisines.
-          shouldLoad={Math.abs(index - activeIndex) <= 1}
-          muted={muted}
-          onToggleMute={() => setMuted((m) => !m)}
-        />
-      ))}
+    <>
+      {/* Onglets de feed (façon For You / Following) */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center pt-3">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/30 p-1 backdrop-blur">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => switchTab(t.key)}
+              className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                tab === t.key ? "bg-white/90 text-night" : "text-white/70 hover:text-white"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="feed-scroll h-dvh snap-y snap-mandatory overflow-y-scroll bg-night"
+      >
+        {status === "loading" && (
+          <div className="flex h-dvh items-center justify-center text-white/60">Chargement…</div>
+        )}
+        {status === "geo-denied" && (
+          <FeedNotice
+            title="Localisation désactivée"
+            text="Autorisez la localisation pour voir les annonces les plus proches de vous."
+          />
+        )}
+        {status === "empty" && (
+          <FeedNotice title="Aucune annonce" text="Rien à afficher pour ce filtre pour l’instant." />
+        )}
+        {status !== "loading" &&
+          items.map((property, index) => (
+            <FeedSlide
+              key={property.id}
+              property={property}
+              active={index === activeIndex}
+              // On ne charge le flux que pour la slide visible et ses voisines.
+              shouldLoad={Math.abs(index - activeIndex) <= 1}
+              muted={muted}
+              onToggleMute={() => setMuted((m) => !m)}
+            />
+          ))}
+      </div>
+    </>
+  );
+}
+
+function FeedNotice({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="flex h-dvh flex-col items-center justify-center gap-2 p-8 text-center">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="max-w-xs text-sm text-white/60">{text}</p>
     </div>
   );
 }
@@ -79,8 +284,37 @@ function FeedSlide({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const maxProgressRef = useRef(0); // fraction 0-1, le plus loin atteint dans la vidéo
   const video = getVideo(property);
   const verification = getVerification(property);
+  const agency = getAgency(property);
+
+  // Suivi de la progression max atteinte (proxy de "complétion" pour une
+  // vidéo en boucle) ; envoyé une fois la slide désactivée.
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element) return;
+    const onTimeUpdate = () => {
+      if (!element.duration) return;
+      const fraction = element.currentTime / element.duration;
+      if (fraction > maxProgressRef.current) maxProgressRef.current = fraction;
+    };
+    element.addEventListener("timeupdate", onTimeUpdate);
+    return () => element.removeEventListener("timeupdate", onTimeUpdate);
+  }, []);
+
+  useEffect(() => {
+    if (active) {
+      maxProgressRef.current = 0;
+      return;
+    }
+    if (maxProgressRef.current > 0) {
+      trackEvent("video_watch", {
+        propertyId: property.id,
+        metadata: { percent: Math.round(maxProgressRef.current * 100) },
+      });
+    }
+  }, [active, property.id]);
 
   // Attache/détache le flux HLS selon la proximité de la slide.
   useEffect(() => {
@@ -130,7 +364,7 @@ function FeedSlide({
   }, [active, shouldLoad]);
 
   return (
-    <section className="relative h-dvh w-full snap-start overflow-hidden">
+    <section data-slide className="relative h-dvh w-full snap-start overflow-hidden">
       {video ? (
         <video
           ref={videoRef}
@@ -160,9 +394,21 @@ function FeedSlide({
         {muted ? <MutedIcon /> : <SoundIcon />}
       </button>
 
-      {/* Infos annonce */}
-      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 p-4 pb-6">
+      {/* Infos annonce — pb élevé pour ne pas passer sous la BottomNav fixe */}
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-4 p-4 pb-24">
         <div className="min-w-0 flex-1">
+          {/* Agent / agence — façon « @créateur » de TikTok */}
+          {agency && (
+            <div className="mb-2 flex items-center gap-2">
+              <AgencyAvatar agency={agency} />
+              <span className="truncate text-sm font-semibold">{agency.name}</span>
+              {agency.verified && (
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-primary" aria-hidden>
+                  <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+                </svg>
+              )}
+            </div>
+          )}
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <VerifiedBadge verification={verification} />
             <span className="rounded-full bg-white/15 px-2.5 py-1 text-xs font-medium backdrop-blur">
@@ -188,7 +434,7 @@ function FeedSlide({
           </Link>
         </div>
 
-        {/* Actions latérales */}
+        {/* Rail d'actions latéral (façon TikTok) */}
         <div className="flex shrink-0 flex-col items-center gap-4 pb-1">
           <div className="flex flex-col items-center gap-1 text-xs text-white/90">
             <FavoriteButton
@@ -197,17 +443,23 @@ function FeedSlide({
             />
             Favoris
           </div>
+          <ShareButton property={property} />
           {property.whatsapp_phone && (
             <ActionButton
               href={whatsappLink(property.whatsapp_phone, property.title)}
               label="WhatsApp"
               external
+              onClick={() => trackEvent("whatsapp_click", { propertyId: property.id })}
             >
               <WhatsAppIcon />
             </ActionButton>
           )}
           {property.contact_phone && (
-            <ActionButton href={`tel:${property.contact_phone}`} label="Appeler">
+            <ActionButton
+              href={`tel:${property.contact_phone}`}
+              label="Appeler"
+              onClick={() => trackEvent("call_click", { propertyId: property.id })}
+            >
               <PhoneIcon />
             </ActionButton>
           )}
@@ -217,15 +469,77 @@ function FeedSlide({
   );
 }
 
+function AgencyAvatar({ agency }: { agency: { name: string; logo_url: string | null } }) {
+  if (agency.logo_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={agency.logo_url}
+        alt={agency.name}
+        className="h-8 w-8 rounded-full border border-white/40 object-cover"
+      />
+    );
+  }
+  return (
+    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-white/40 bg-primary/80 text-sm font-bold">
+      {agency.name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+// Bouton Partager : Web Share API natif, repli sur copie du lien.
+function ShareButton({ property }: { property: Property }) {
+  const [copied, setCopied] = useState(false);
+
+  async function share() {
+    trackEvent("share", { propertyId: property.id });
+    const url =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/annonces/${property.id}`
+        : `/annonces/${property.id}`;
+    const data = {
+      title: property.title,
+      text: `${property.title} — ${formatPrice(property.price, property.offer_type)} sur Worimo`,
+      url,
+    };
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share(data);
+        return;
+      } catch {
+        /* annulé : on ignore */
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* pas de presse-papiers : on ignore */
+    }
+  }
+
+  return (
+    <button onClick={share} className="flex flex-col items-center gap-1 text-xs text-white/90">
+      <span className="rounded-full bg-black/40 p-3 backdrop-blur transition hover:bg-primary">
+        <ShareIcon />
+      </span>
+      {copied ? "Copié !" : "Partager"}
+    </button>
+  );
+}
+
 function ActionButton({
   href,
   label,
   external,
+  onClick,
   children,
 }: {
   href: string;
   label: string;
   external?: boolean;
+  onClick?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -233,6 +547,7 @@ function ActionButton({
       href={href}
       target={external ? "_blank" : undefined}
       rel={external ? "noopener noreferrer" : undefined}
+      onClick={onClick}
       className="flex flex-col items-center gap-1 text-xs text-white/90"
     >
       <span className="rounded-full bg-black/40 p-3 backdrop-blur transition hover:bg-primary">
@@ -240,6 +555,14 @@ function ActionButton({
       </span>
       {label}
     </a>
+  );
+}
+
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden>
+      <path d="M13 4.5a2.5 2.5 0 1 1 .9 1.92l-4.7 2.71a2.5 2.5 0 0 1 0 1.74l4.7 2.71a2.5 2.5 0 1 1-.75 1.3l-4.7-2.71a2.5 2.5 0 1 1 0-4.34l4.7-2.71A2.5 2.5 0 0 1 13 4.5Z" />
+    </svg>
   );
 }
 

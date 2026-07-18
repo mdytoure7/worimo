@@ -96,6 +96,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   _buildProfileCard(role),
+                  if (canPublish) ...[
+                    const SizedBox(height: 16),
+                    _buildStats(),
+                  ],
                   const SizedBox(height: 24),
                   if (canPublish) ...[
                     Row(
@@ -117,7 +121,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Text('Aucune annonce pour l\'instant.',
                           style: TextStyle(color: Colors.white.withValues(alpha: 0.6)))
                     else
-                      ..._properties.map(_buildPropertyTile),
+                      GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: 3,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 8,
+                        childAspectRatio: 9 / 16,
+                        children: _properties.map(_buildPropertyGridTile).toList(),
+                      ),
                   ],
                   const SizedBox(height: 16),
                   TextButton.icon(
@@ -183,7 +195,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildPropertyTile(Map<String, dynamic> p) {
+  /// Compteurs façon profil TikTok : total, publiées, en attente.
+  Widget _buildStats() {
+    final total = _properties.length;
+    final published = _properties.where((p) => p['status'] == 'published').length;
+    final pending = _properties.where((p) => p['status'] == 'pending').length;
+    Widget stat(int value, String label) => Column(
+          children: [
+            Text('$value', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12)),
+          ],
+        );
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        stat(total, 'Annonces'),
+        stat(published, 'Publiées'),
+        stat(pending, 'En attente'),
+      ],
+    );
+  }
+
+  /// Vignette d'annonce façon grille TikTok (miniature verticale + statut).
+  Widget _buildPropertyGridTile(Map<String, dynamic> p) {
     final status = p['status'] as String? ?? 'draft';
     final statusInfo = _statusInfo(status);
     final media = (p['property_media'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
@@ -198,77 +232,71 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (m['kind'] == 'image' && m['url'] != null) thumb = m['url'] as String;
     }
     final offerType = offerTypeFromString(p['offer_type'] as String?);
+    final published = status == 'published';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: thumb != null
-                    ? Image.network(thumb, width: 48, height: 64, fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _thumbPlaceholder())
-                    : _thumbPlaceholder(),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(p['title'] as String? ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${p['city']} · ${formatPrice((p['price'] as num?) ?? 0, offerType)}',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 13),
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: statusInfo.$2.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(statusInfo.$1,
-                          style: TextStyle(
-                              color: statusInfo.$2, fontSize: 11, fontWeight: FontWeight.w600)),
-                    ),
-                  ],
+    return GestureDetector(
+      onTap: published
+          ? () => Navigator.of(context).pushNamed('/property', arguments: p['id'])
+          : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            thumb != null
+                ? Image.network(thumb, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _thumbPlaceholder())
+                : _thumbPlaceholder(),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.center,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black87],
                 ),
               ),
-            ],
-          ),
-          if (status == 'rejected' && p['rejection_reason'] != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
+            ),
+            Positioned(
+              top: 6,
+              left: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusInfo.$2.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(statusInfo.$1,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600)),
               ),
-              child: Text('Motif du refus : ${p['rejection_reason']}',
-                  style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 13)),
+            ),
+            Positioned(
+              left: 6,
+              right: 6,
+              bottom: 6,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(p['title'] as String? ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                  Text(formatPrice((p['price'] as num?) ?? 0, offerType),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: WorimoColors.primary, fontSize: 10)),
+                ],
+              ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
 
   Widget _thumbPlaceholder() => Container(
-        width: 48,
-        height: 64,
         color: Colors.white.withValues(alpha: 0.1),
         child: Icon(Icons.image, color: Colors.white.withValues(alpha: 0.3), size: 20),
       );

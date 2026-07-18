@@ -9,6 +9,7 @@ import Link from "next/link";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { PROPERTY_SELECT, type Property } from "@/lib/types";
 import PropertyCard from "@/components/PropertyCard";
+import BottomNav from "@/components/BottomNav";
 
 type State =
   | { name: "loading" }
@@ -40,17 +41,11 @@ export default function FavoritesPage() {
   }, []);
 
   return (
-    <main className="min-h-dvh bg-night pb-16">
+    <main className="min-h-dvh bg-night pb-24">
       <header className="sticky top-0 z-10 flex items-center justify-between bg-night/90 p-4 backdrop-blur">
         <Link href="/" className="text-lg font-bold">
           <span className="text-primary">Wori</span>mo
           <span className="ml-2 text-sm font-normal text-white/60">· Mes favoris</span>
-        </Link>
-        <Link
-          href="/recherche"
-          className="rounded-full border border-white/25 px-4 py-1.5 text-sm font-medium transition hover:bg-white/10"
-        >
-          Rechercher
         </Link>
       </header>
 
@@ -94,6 +89,7 @@ export default function FavoritesPage() {
           </>
         )}
       </div>
+      <BottomNav />
     </main>
   );
 }

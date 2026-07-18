@@ -13,6 +13,7 @@ import {
 } from "@/lib/types";
 import VerifiedBadge from "@/components/VerifiedBadge";
 import FavoriteButton from "@/components/FavoriteButton";
+import TrackedLink from "@/components/TrackedLink";
 
 export const revalidate = 0;
 
@@ -24,7 +25,15 @@ async function fetchProperty(id: string): Promise<Property | null> {
     .eq("id", id)
     .eq("status", "published")
     .maybeSingle();
-  return (data as unknown as Property) ?? null;
+  const property = (data as unknown as Property) ?? null;
+  if (property) {
+    // Fire-and-forget : jamais bloquant pour le rendu de la page.
+    supabase.from("events").insert({ type: "property_view", property_id: property.id }).then(
+      () => {},
+      () => {},
+    );
+  }
+  return property;
 }
 
 export default async function PropertyPage({
@@ -201,22 +210,25 @@ export default async function PropertyPage({
             className="rounded-full border border-white/25 p-3 transition hover:bg-white/10"
           />
           {property.whatsapp_phone && (
-            <a
+            <TrackedLink
               href={whatsappLink(property.whatsapp_phone, property.title)}
-              target="_blank"
-              rel="noopener noreferrer"
+              propertyId={property.id}
+              eventType="whatsapp_click"
+              external
               className="flex-1 rounded-full bg-primary py-3 text-center font-semibold transition hover:bg-primary-dark"
             >
               WhatsApp
-            </a>
+            </TrackedLink>
           )}
           {property.contact_phone && (
-            <a
+            <TrackedLink
               href={`tel:${property.contact_phone}`}
+              propertyId={property.id}
+              eventType="call_click"
               className="flex-1 rounded-full border border-white/25 py-3 text-center font-semibold transition hover:bg-white/10"
             >
               Appeler
-            </a>
+            </TrackedLink>
           )}
         </div>
       </div>

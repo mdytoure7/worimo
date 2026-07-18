@@ -37,9 +37,10 @@ class PropertyFilters {
     PropertySort? sort,
     bool clearType = false,
     bool clearOffer = false,
+    bool clearCity = false,
   }) {
     return PropertyFilters(
-      city: city ?? this.city,
+      city: clearCity ? null : (city ?? this.city),
       type: clearType ? null : (type ?? this.type),
       offerType: clearOffer ? null : (offerType ?? this.offerType),
       priceMin: priceMin ?? this.priceMin,
@@ -58,17 +59,47 @@ class PropertyRepository {
   final _db = SupabaseService.client;
 
   /// Feed : annonces publiées avec vidéo prête, plus récentes d'abord.
-  Future<List<Property>> fetchFeed({int limit = 20, int offset = 0}) async {
-    final rows = await _db
+  /// `offerType` segmente le feed (onglets « À louer » / « À vendre »).
+  Future<List<Property>> fetchFeed({int limit = 20, int offset = 0, OfferType? offerType}) async {
+    var query = _db
         .from('properties')
         .select(propertySelect)
-        .eq('status', 'published')
+        .eq('status', 'published');
+    if (offerType != null) query = query.eq('offer_type', offerType.name);
+
+    final rows = await query
         .order('published_at', ascending: false)
         .range(offset, offset + limit - 1);
 
     return (rows as List)
         .map((r) => Property.fromJson(r as Map<String, dynamic>))
         .where((p) => p.video != null) // le feed est vidéo-first
+        .toList();
+  }
+
+  /// Page suivante du feed, par curseur (published_at, id) — stable même si
+  /// de nouvelles annonces sont publiées pendant le scroll (contrairement à
+  /// une pagination par offset, qui décalerait tout). Miroir du web.
+  Future<List<Property>> fetchFeedAfter(Property cursor, {int limit = 10, OfferType? offerType}) async {
+    final publishedAt = cursor.publishedAt;
+    if (publishedAt == null) return [];
+    final iso = publishedAt.toIso8601String();
+
+    var query = _db
+        .from('properties')
+        .select(propertySelect)
+        .eq('status', 'published');
+    if (offerType != null) query = query.eq('offer_type', offerType.name);
+
+    final rows = await query
+        .or('published_at.lt.$iso,and(published_at.eq.$iso,id.lt.${cursor.id})')
+        .order('published_at', ascending: false)
+        .order('id', ascending: false)
+        .limit(limit);
+
+    return (rows as List)
+        .map((r) => Property.fromJson(r as Map<String, dynamic>))
+        .where((p) => p.video != null)
         .toList();
   }
 

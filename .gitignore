@@ -12,6 +12,7 @@ supabase/functions/.env
 web/.next/
 web/out/
 web/next-env.d.ts
+web/tsconfig.tsbuildinfo
 
 # Build
 dist/

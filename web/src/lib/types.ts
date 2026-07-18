@@ -1,3 +1,6 @@
+/** Taille de page du feed — doit être identique au 1er chargement (serveur) et à la pagination infinie (client). */
+export const FEED_PAGE_SIZE = 10;
+
 /** Sélection PostgREST standard d'une annonce avec médias, vérification, agence. */
 export const PROPERTY_SELECT = `
   id, title, description, type, offer_type, price, surface, rooms,
@@ -79,6 +82,10 @@ export const OFFER_TYPE_LABELS: Record<OfferType, string> = {
   sale: "À vendre",
   rent: "À louer",
 };
+
+export function getAgency(property: Property): Agency | null {
+  return property.agencies ?? null;
+}
 
 export function getVerification(property: Property): Verification | null {
   const v = property.verifications;

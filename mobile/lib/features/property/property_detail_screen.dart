@@ -6,6 +6,7 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../core/theme.dart';
 import '../../data/property_repository.dart';
+import '../../data/tracking_repository.dart';
 import '../../shared/favorite_button.dart';
 import '../../shared/verified_badge.dart';
 import 'contact_actions.dart';
@@ -23,6 +24,7 @@ class PropertyDetailScreen extends StatefulWidget {
 
 class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
   final _repo = PropertyRepository();
+  final _tracking = TrackingRepository();
   Player? _player;
   VideoController? _videoController;
   Property? _property;
@@ -46,6 +48,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
         });
         return;
       }
+      _tracking.logEvent('property_view', propertyId: property.id);
       final video = property.video;
       if (video?.manifestUrl != null) {
         final player = Player();
@@ -275,7 +278,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
           if (p.whatsappPhone != null)
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: () => openWhatsApp(p.whatsappPhone!, p.title),
+                onPressed: () => openWhatsApp(p.whatsappPhone!, p.title, propertyId: p.id),
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
                 icon: const Icon(Icons.chat, color: Colors.white),
                 label: const Text('WhatsApp'),
@@ -285,7 +288,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
           if (p.contactPhone != null)
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: () => openPhone(p.contactPhone!),
+                onPressed: () => openPhone(p.contactPhone!, propertyId: p.id),
                 icon: const Icon(Icons.phone, color: Colors.white),
                 label: const Text('Appeler'),
               ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/models.dart';
 import '../../core/theme.dart';
 import '../../data/property_repository.dart';
+import '../../data/tracking_repository.dart';
 import '../../shared/property_card.dart';
 
 const _cities = [
@@ -19,6 +20,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _repo = PropertyRepository();
+  final _tracking = TrackingRepository();
   PropertyFilters _filters = const PropertyFilters();
   List<Property> _results = [];
   bool _loading = true;
@@ -29,14 +31,89 @@ class _SearchScreenState extends State<SearchScreen> {
     _run();
   }
 
+  bool get _hasActiveFilter =>
+      (_filters.city?.trim().isNotEmpty ?? false) ||
+      _filters.type != null ||
+      _filters.offerType != null ||
+      _filters.priceMin != null ||
+      _filters.priceMax != null ||
+      _filters.surfaceMin != null ||
+      _filters.surfaceMax != null ||
+      _filters.verifiedOnly;
+
   Future<void> _run() async {
     setState(() => _loading = true);
     try {
       final results = await _repo.search(_filters);
       if (mounted) setState(() => _results = results);
+      if (_hasActiveFilter) {
+        final summary = [
+          _filters.city, _filters.type?.name, _filters.offerType?.name,
+          if (_filters.priceMin != null) '>=${_filters.priceMin}',
+          if (_filters.priceMax != null) '<=${_filters.priceMax}',
+          if (_filters.verifiedOnly) 'vérifié',
+        ].whereType<String>().where((s) => s.isNotEmpty).join(' ');
+        _tracking.logEvent('search', query: summary);
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Bande « Découvrir » : chips catégories + villes (façon Discover TikTok).
+  Widget _discoverChips() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 38,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: PropertyType.values.map((t) {
+              final active = _filters.type == t;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: _Chip(
+                  label: propertyTypeLabels[t]!,
+                  active: active,
+                  onTap: () {
+                    setState(() => _filters =
+                        _filters.copyWith(type: active ? null : t, clearType: active));
+                    _run();
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 34,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: _cities.map((c) {
+              final active = _filters.city == c;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: _Chip(
+                  label: c,
+                  active: active,
+                  small: true,
+                  onTap: () {
+                    setState(() => _filters =
+                        _filters.copyWith(city: active ? null : c, clearCity: active));
+                    _run();
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
   }
 
   Future<void> _openFilters() async {
@@ -69,6 +146,8 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       body: Column(
         children: [
+          const SizedBox(height: 8),
+          _discoverChips(),
           if (_filters.verifiedOnly ||
               _filters.city != null ||
               _filters.type != null ||
@@ -277,4 +356,43 @@ class _FilterSheetState extends State<_FilterSheet> {
         keyboardType: TextInputType.number,
         decoration: InputDecoration(labelText: label),
       );
+}
+
+/// Chip de découverte : pilule sélectionnable (catégorie ou ville).
+class _Chip extends StatelessWidget {
+  const _Chip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.small = false,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  final bool small;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        alignment: Alignment.center,
+        padding: EdgeInsets.symmetric(horizontal: small ? 12 : 14, vertical: small ? 6 : 8),
+        decoration: BoxDecoration(
+          color: active ? WorimoColors.primary : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : Colors.white.withValues(alpha: 0.8),
+            fontWeight: FontWeight.w500,
+            fontSize: small ? 13 : 14,
+          ),
+        ),
+      ),
+    );
+  }
 }

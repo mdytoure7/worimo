@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { formatPrice, type OfferType } from "@/lib/types";
+import BottomNav from "@/components/BottomNav";
 
 interface ProfileInfo {
   id: string;
@@ -136,7 +137,7 @@ export default function ProfilePage() {
   const canPublish = ["seller", "agency", "admin"].includes(profile.role);
 
   return (
-    <main className="min-h-dvh bg-night pb-16">
+    <main className="min-h-dvh bg-night pb-24">
       <header className="sticky top-0 z-10 flex items-center justify-between bg-night/90 p-4 backdrop-blur">
         <Link href="/" className="text-lg font-bold">
           <span className="text-primary">Wori</span>mo
@@ -151,6 +152,8 @@ export default function ProfilePage() {
       </header>
 
       <div className="mx-auto max-w-2xl space-y-8 p-4">
+        <ProfileHeader profile={profile} agency={agency} properties={properties} />
+
         <ProfileForm profile={profile} onSaved={load} />
 
         {profile.role === "agency" && (
@@ -173,22 +176,22 @@ export default function ProfilePage() {
                 Aucune annonce pour l&apos;instant.
               </p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {properties.map((property) => (
-                  <MyPropertyRow key={property.id} property={property} onChanged={load} />
+                  <MyPropertyTile key={property.id} property={property} onChanged={load} />
                 ))}
               </ul>
             )}
           </section>
         )}
 
-        <div className="flex flex-wrap gap-3 text-sm">
-          <Link href="/favoris" className="text-primary hover:underline">Mes favoris</Link>
-          {profile.role === "admin" && (
+        {profile.role === "admin" && (
+          <div className="flex flex-wrap gap-3 text-sm">
             <Link href="/admin" className="text-primary hover:underline">Administration</Link>
-          )}
-        </div>
+          </div>
+        )}
       </div>
+      <BottomNav />
     </main>
   );
 }
@@ -354,7 +357,57 @@ function AgencyForm({
   );
 }
 
-function MyPropertyRow({
+/** En-tête profil façon TikTok : avatar, nom, rôle et compteurs d'annonces. */
+function ProfileHeader({
+  profile,
+  agency,
+  properties,
+}: {
+  profile: ProfileInfo;
+  agency: AgencyInfo | null;
+  properties: MyProperty[];
+}) {
+  const displayName = agency?.name ?? profile.full_name;
+  const total = properties.length;
+  const published = properties.filter((p) => p.status === "published").length;
+  const pending = properties.filter((p) => p.status === "pending").length;
+
+  return (
+    <section className="flex flex-col items-center gap-3 text-center">
+      <span className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/80 text-3xl font-bold">
+        {displayName.charAt(0).toUpperCase()}
+      </span>
+      <div>
+        <h1 className="flex items-center justify-center gap-1.5 text-xl font-bold">
+          {displayName}
+          {agency?.verified && (
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5 text-primary" aria-hidden>
+              <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+            </svg>
+          )}
+        </h1>
+        <p className="text-sm text-white/50">{ROLE_LABELS[profile.role]}</p>
+      </div>
+      <div className="flex items-center gap-8">
+        <Stat value={total} label="Annonces" />
+        <Stat value={published} label="Publiées" />
+        <Stat value={pending} label="En attente" />
+      </div>
+    </section>
+  );
+}
+
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-lg font-bold">{value}</span>
+      <span className="text-xs text-white/50">{label}</span>
+    </div>
+  );
+}
+
+/** Vignette d'annonce façon grille TikTok, avec actions de gestion en pied. */
+function MyPropertyTile({
   property,
   onChanged,
 }: {
@@ -371,7 +424,6 @@ function MyPropertyRow({
     media.find((m) => m.kind === "video")?.thumbnail_url ??
     media.find((m) => m.kind === "image")?.url ??
     null;
-  const videoStatus = media.find((m) => m.kind === "video")?.status;
 
   async function setStatus(status: "archived" | "pending") {
     setBusy(true);
@@ -397,58 +449,51 @@ function MyPropertyRow({
     else onChanged();
   }
 
-  return (
-    <li className="rounded-2xl bg-white/5 p-3">
-      <div className="flex items-center gap-3">
-        {thumbnail ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={thumbnail} alt="" className="h-16 w-12 shrink-0 rounded-lg object-cover" />
-        ) : (
-          <span className="flex h-16 w-12 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs text-white/40">
-            —
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium">{property.title}</p>
-          <p className="text-sm text-white/60">
-            {property.city} · {formatPrice(property.price, property.offer_type)}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${chip.className}`}>
-              {chip.label}
-            </span>
-            {property.status === "pending" && videoStatus && videoStatus !== "ready" && (
-              <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/50">
-                {videoStatus === "failed" ? "Vidéo en échec" : "Vidéo en traitement…"}
-              </span>
-            )}
-          </div>
-        </div>
-        {property.status === "published" && (
-          <Link
-            href={`/annonces/${property.id}`}
-            className="shrink-0 rounded-full border border-white/25 px-3 py-1.5 text-xs font-medium transition hover:bg-white/10"
-          >
-            Voir
-          </Link>
-        )}
+  const TileInner = (
+    <div className="relative aspect-[9/16] w-full overflow-hidden rounded-xl bg-white/10">
+      {thumbnail ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <span className="flex h-full items-center justify-center text-xs text-white/40">
+          Pas de média
+        </span>
+      )}
+      <span className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.className}`}>
+        {chip.label}
+      </span>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+        <p className="truncate text-xs font-medium">{property.title}</p>
+        <p className="truncate text-[11px] text-primary">
+          {formatPrice(property.price, property.offer_type)}
+        </p>
       </div>
+    </div>
+  );
+
+  return (
+    <li className="flex flex-col gap-1.5">
+      {property.status === "published" ? (
+        <Link href={`/annonces/${property.id}`}>{TileInner}</Link>
+      ) : (
+        TileInner
+      )}
 
       {property.status === "rejected" && property.rejection_reason && (
-        <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">
-          Motif du refus : {property.rejection_reason}
+        <p className="rounded-lg bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
+          Refus : {property.rejection_reason}
         </p>
       )}
       {error && (
-        <p className="mt-2 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-300">{error}</p>
+        <p className="rounded-lg bg-red-500/15 px-2 py-1 text-[11px] text-red-300">{error}</p>
       )}
 
-      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+      <div className="flex flex-wrap gap-1 text-[11px]">
         {property.status === "published" && (
           <button
             onClick={() => setStatus("archived")}
             disabled={busy}
-            className="rounded-full border border-white/25 px-3 py-1.5 font-medium transition hover:bg-white/10 disabled:opacity-40"
+            className="rounded-full border border-white/25 px-2.5 py-1 font-medium transition hover:bg-white/10 disabled:opacity-40"
           >
             Archiver
           </button>
@@ -457,25 +502,25 @@ function MyPropertyRow({
           <button
             onClick={() => setStatus("pending")}
             disabled={busy}
-            className="rounded-full border border-white/25 px-3 py-1.5 font-medium transition hover:bg-white/10 disabled:opacity-40"
+            className="rounded-full border border-white/25 px-2.5 py-1 font-medium transition hover:bg-white/10 disabled:opacity-40"
           >
-            Soumettre à nouveau
+            Re-soumettre
           </button>
         )}
-        {property.status !== "published" && (
-          confirmingDelete ? (
+        {property.status !== "published" &&
+          (confirmingDelete ? (
             <>
               <button
                 onClick={remove}
                 disabled={busy}
-                className="rounded-full bg-red-500/80 px-3 py-1.5 font-medium transition hover:bg-red-500 disabled:opacity-40"
+                className="rounded-full bg-red-500/80 px-2.5 py-1 font-medium transition hover:bg-red-500 disabled:opacity-40"
               >
-                Confirmer la suppression
+                Confirmer
               </button>
               <button
                 onClick={() => setConfirmingDelete(false)}
                 disabled={busy}
-                className="rounded-full border border-white/25 px-3 py-1.5 font-medium transition hover:bg-white/10"
+                className="rounded-full border border-white/25 px-2.5 py-1 font-medium transition hover:bg-white/10"
               >
                 Annuler
               </button>
@@ -484,12 +529,11 @@ function MyPropertyRow({
             <button
               onClick={() => setConfirmingDelete(true)}
               disabled={busy}
-              className="rounded-full border border-red-400/50 px-3 py-1.5 font-medium text-red-300 transition hover:bg-red-500/10 disabled:opacity-40"
+              className="rounded-full border border-red-400/50 px-2.5 py-1 font-medium text-red-300 transition hover:bg-red-500/10 disabled:opacity-40"
             >
               Supprimer
             </button>
-          )
-        )}
+          ))}
       </div>
     </li>
   );
